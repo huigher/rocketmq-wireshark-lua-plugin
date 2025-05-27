@@ -1,5 +1,7 @@
-package.prepend_path("rocketmq-plugin")
-local json = dofile(DATA_DIR.."rocketmq-plugin/json.lua")
+-- 获取当前脚本所在目录
+local script_path = debug.getinfo(1, "S").source:sub(2):match("(.*/)")
+-- 加载json.lua文件
+local json = dofile(script_path .. "json.lua")
 
 local requestCodeMap = {
     [10] = "SEND_MESSAGE",
@@ -118,13 +120,9 @@ local responseCode = {
     [208] = "NO_MESSAGE",
 }
 
-local PORTS = { 9876, 10911, 20111 }
-
-function isUpDirection(dstPort)
-    for _, port in ipairs(PORTS) do
-        if (dstPort == port) then
-            return true
-        end
+function isUpDirection(srcPort)
+    if (srcPort > 10000) then
+        return true
     end
     return false
 end
@@ -255,18 +253,20 @@ function protoMQ.dissector(tvb, pinfo, tree)
     pinfo.cols.info = ""
 
     local length = tvb(0, 4):uint()
+    subtree:add("Total Length:", length)
 
-    subtree:add("Length", length)
     local headerLength = tvb(4, 4):uint()
+    subtree:add("Header Length:", headerLength)
+    
     local headerData = tvb(8, headerLength):string()
     local header = json.parse(headerData, 1, "}")
     local headerTree = subtree:add("Header", "")
 
     local isRemarkFound = false
 
-    if (isUpDirection(dstPort)) then
+    if (isUpDirection(srcPort)) then
         --        request
-        pinfo.cols.info:append("[REQUEST]" .. "↑↑↑")
+        pinfo.cols.info:append("[REQUEST]" .. "↑")
         for k, v in pairs(header) do
             if (k == "code") then
                 local codeStr = requestCodeMap[v];
@@ -285,7 +285,7 @@ function protoMQ.dissector(tvb, pinfo, tree)
         end
     else
         --        response
-        pinfo.cols.info:append("[RESPONSE]" .. "↓↓↓")
+        pinfo.cols.info:append("[RESPONSE]" .. "↓")
         for k, v in pairs(header) do
             if (k == "code") then
                 local codeStr = responseCode[v];
@@ -325,6 +325,6 @@ function protoMQ.dissector(tvb, pinfo, tree)
 end
 
 
-for _, port in ipairs(PORTS) do
-    DissectorTable.get("tcp.port"):add(port, protoMQ)
-end
+-- Register this dissector to allow dynamic "Decode As..."
+local tcp_table = DissectorTable.get("tcp.port")
+tcp_table:add_for_decode_as(protoMQ)
